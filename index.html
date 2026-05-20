@@ -1,0 +1,780 @@
+import { useState, useRef } from "react";
+
+const NICHES = [
+  { id: "beauty",  label: "Beauty & Skincare",      emoji: "✨", color: "#f4a7b9" },
+  { id: "home",    label: "Home & Lifestyle",        emoji: "🏠", color: "#a8d8a8" },
+  { id: "health",  label: "Health & Wellness",       emoji: "💪", color: "#ffd580" },
+  { id: "fashion", label: "Fashion & Accessories",   emoji: "👗", color: "#b5c9f7" },
+];
+
+const PLATFORMS = [
+  { id: "tiktok",   label: "TikTok",            ratio: "9:16",    duration: "15–60 sec" },
+  { id: "reels",    label: "Instagram Reels",   ratio: "9:16",    duration: "15–90 sec" },
+  { id: "youtube",  label: "YouTube Shorts",    ratio: "9:16",    duration: "up to 60 sec" },
+  { id: "feed",     label: "Instagram Feed",    ratio: "1:1/4:5", duration: "Static / Carousel" },
+  { id: "multi",    label: "Multi-platform",    ratio: "Adaptive", duration: "Flexible" },
+];
+
+const CONTENT_TYPES = [
+  { id: "review",        label: "Product Review",          icon: "⭐", desc: "Unboxing, first impressions, real results" },
+  { id: "before_after",  label: "Before & After",          icon: "🔄", desc: "Visual transformation before and after" },
+  { id: "lifestyle",     label: "Lifestyle / Storytelling", icon: "🎬", desc: "Product integrated into everyday life" },
+];
+
+const AI_GENERATORS = [
+  { id: "kling",      label: "Kling AI",               type: "video" },
+  { id: "runway",     label: "Runway Gen-3",            type: "video" },
+  { id: "sora",       label: "Sora (OpenAI)",           type: "video" },
+  { id: "midjourney", label: "Midjourney",              type: "image" },
+  { id: "flux",       label: "Flux / Stable Diffusion", type: "image" },
+  { id: "pika",       label: "Pika Labs",               type: "video" },
+  { id: "auto",       label: "Flexible / Auto",        type: "both" },
+];
+
+const FASHION_SUBCATEGORIES = [
+  { id: "clothing", label: "Clothing",          emoji: "👗", desc: "Tops, shirts, dresses, outerwear, pants" },
+  { id: "bag",      label: "Bags & Accessories", emoji: "👜", desc: "Handbag, slingbag, tote, wallet, accessories" },
+];
+
+const SMARTPHONE_BASE = "shot on smartphone, handheld camera, natural shaky movement, amateurish UGC feel, slightly imperfect framing, real-person POV, no tripod, organic motion blur on movement";
+
+const TONES = [
+  { id: "energetic",   label: "Energetic & Viral",     style: `fast cuts, bold color grading, high saturation, dynamic handheld camera movement, bright warm tones, pop aesthetic, ${SMARTPHONE_BASE}` },
+  { id: "elegant",     label: "Elegant & Premium",     style: `gentle handheld sway, soft bokeh, luxury color palette ivory champagne deep green, soft natural window lighting, ${SMARTPHONE_BASE}` },
+  { id: "warm",        label: "Warm & Personal",       style: `handheld natural movement, golden hour lighting, candid feel, warm tones, intimate close-ups, soft vignette, ${SMARTPHONE_BASE}` },
+  { id: "educational", label: "Educational & Informative", style: `slightly shaky close-up shots, natural daylight, clear product detail, neutral tones, held in one hand while filming, ${SMARTPHONE_BASE}` },
+];
+
+const STEPS = ["Photo", "Niche", "Category", "Platform", "Content", "AI Tool", "Tone", "Product", "Confirm"];
+
+function buildStaticPrompt({ niche, fashionSub, platform, contentType, aiGen, tone, productName, productBenefit }) {
+  const nicheObj    = NICHES.find(n => n.id === niche);
+  const platformObj = PLATFORMS.find(p => p.id === platform);
+  const contentObj  = CONTENT_TYPES.find(c => c.id === contentType);
+  const aiObj       = AI_GENERATORS.find(a => a.id === aiGen);
+  const toneObj     = TONES.find(t => t.id === tone);
+
+  const nicheLabel    = nicheObj?.label    || "Product";
+  const platformLabel = platformObj?.label || "Multi-platform";
+  const contentLabel  = contentObj?.label  || "Content";
+  const aiLabel       = aiObj?.label       || "AI Generator";
+  const toneLabel     = toneObj?.label     || "Natural";
+  const visualStyle   = toneObj?.style     || TONES[2].style;
+  const ratio         = platformObj?.ratio    || "9:16";
+  const duration      = platformObj?.duration || "Flexible";
+  const product       = productName    || "[Product Name]";
+  const benefit       = productBenefit || "[Key Product Benefit]";
+
+  const NEG_SHORT = `no speech, no talking, no open mouth, no lip movement, no text overlay, no studio lighting, no tripod, no stabilizer, no gimbal, no watermark`;
+
+  const isKling = aiGen === "kling";
+
+  const klingify = (shot) => {
+    const noTs = shot.replace(/^\[\d+:\d+[-–]\d+:\d+\]\s*/, "");
+    const sentences = noTs.split(/[.—]+/).filter(s => s.trim().length > 5).slice(0, 2);
+    const joined = sentences.join(". ").trim();
+    const words = joined.split(/\s+/);
+    return (words.length > 40 ? words.slice(0, 40).join(" ") + "..." : joined);
+  };
+
+  const SCENE_NEG = `❌ NEGATIVE PROMPT:\nno talking, no speaking, no open mouth, no mouth movement, no dialogue, no lip sync, no lip movement, no voiceover, no verbal communication — IF any model appears: must NOT speak, must NOT open mouth, must be completely silent; no influencer pose, no studio lighting, no tripod, no gimbal, no watermark`;
+
+  const makeScene = (num, label, anchor, sub1, sub2) => {
+    if (isKling) {
+      return (
+`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCENE ${num} — ${label}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🖼️ IMAGE ANCHOR (upload to Kling):
+${anchor}
+
+🎬 KLING PROMPT — Shot A:
+${klingify(sub1)}
+
+🎬 KLING PROMPT — Shot B:
+${klingify(sub2)}
+
+❌ NEGATIVE: ${NEG_SHORT}`
+      );
+    }
+    return (
+`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCENE ${num} — ${label}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🖼️ IMAGE ANCHOR:
+${anchor}
+
+\`\`\`
+${sub1}
+
+${sub2}
+\`\`\`
+
+${SCENE_NEG}`
+    );
+  };
+
+  const fashionShots = [
+    makeScene(1, "INTRO — CLOTHING ON TABLE",
+      `Photorealistic, shot on smartphone, handheld UGC — ${product} neatly laid flat on a wooden table or bed surface, natural daylight from window illuminating fabric texture and details. Slightly imperfect framing, no mannequin, no hanger. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Handheld smartphone — slow side-to-side pan across ${product} laid on a table. Natural window light highlights fabric texture. Slight organic sway, no gimbal.`,
+      `[0:04-0:08] Camera dips closer to fabric surface — close-up on texture, stitching, or color detail. Autofocus hunts then locks on best detail. Warm ambient light.`
+    ),
+    makeScene(2, "MODEL SELF-RECORDING",
+      `Photorealistic, selfie-mode smartphone shot — person wearing ${product} holding phone at arm's length toward their own face/body, recording themselves, indoor or semi-outdoor setting, natural ambient light, authentic self-filmed UGC feel. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Model holds smartphone at arm's length, angled toward themselves — selfie-style self-recording. ${product} clearly visible on their body. Camera arm slightly unstable, natural shake. Model looks at the phone lens, NOT speaking. Natural indoor or semi-outdoor light.`,
+      `[0:04-0:08] Model slowly lowers the phone from face-level down to chest/waist level — revealing more of the ${product} outfit. One hand holds the phone, the other naturally hangs or touches the garment. Organic wrist movement, no stabilization. Model does NOT speak.`
+    ),
+    makeScene(3, "OUTDOOR — WIDE STATIC SHOT",
+      `Photorealistic, wide shot, static camera — person wearing ${product} standing or walking naturally in outdoor setting (street, park, or building exterior), golden hour or natural daylight, full body visible, camera completely stationary. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Wide shot — camera placed or propped still, completely stationary. Person wearing ${product} stands or walks naturally within the frame. Full body visible from head to toe. Camera does NOT move, pan, or tilt. Natural outdoor daylight. Candid feel — model unaware of camera.`,
+      `[0:04-0:08] Same static wide angle — model continues natural movement within frame (adjusting outfit, turning slightly, walking past). Camera stays completely locked off. Full outfit visible at all times. Golden hour or bright daylight.`
+    ),
+    makeScene(4, "CANDID SHOT — WIDE STATIC",
+      `Photorealistic, wide shot, static camera — candid full-body shot of person wearing ${product} in natural indoor or outdoor setting, camera completely stationary, no movement, full outfit visible, natural ambient light. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Wide static shot — camera locked off and completely still. Model wearing ${product} moves naturally within frame: walking slowly, looking around, adjusting garment. Full outfit from head to toe visible. No camera movement whatsoever. Natural ambient light.`,
+      `[0:04-0:08] Camera remains fully static. Model pauses or slows within frame — wide angle shows complete outfit in environment. ${visualStyle}. Natural light — golden hour or bright daylight.`
+    ),
+  ];
+
+  const shots = {
+    review: [
+      makeScene(1, "HOOK",
+        `Photorealistic, shot on smartphone, handheld UGC — creator's hand reaches into frame lifting ${product} toward camera. Natural window light, bedroom setting, slightly imperfect framing. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Handheld smartphone POV — creator's hand reaches up from below frame, lifting ${product} directly toward the lens. Camera slightly shaky and imperfect. Natural window light.`,
+        `[0:04-0:08] Same handheld POV — camera slowly pulls back, ${product} now fully in frame. Creator's wrist rotates slightly to show front face. Organic sway. ${visualStyle}.`
+      ),
+      makeScene(2, "PRODUCT DETAIL",
+        `Macro close-up shot on smartphone, handheld — ${product} held 5cm from lens, natural daylight from window, authentic texture visible, slightly soft focus on edges, UGC aesthetic. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Macro shot rear camera — hand holds ${product} close to lens. Natural window light, slight flicker. Autofocus hunts then locks on texture and color detail. Authentic feel.`,
+        `[0:04-0:08] Hand slowly rotates product, fingers touch surface to reveal detail. Slight motion blur as hand moves. Natural ambient light, no ring light.`
+      ),
+      makeScene(3, "DEMONSTRATION",
+        `First-person smartphone POV — creator's hands using ${product} in natural setting. Handheld, one hand filming, slightly tilted organic framing, warm room light, real-life background. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] First-person POV — own hand using ${product}. Camera held in one hand, organic framing slightly tilted. Natural texture visible.`,
+        `[0:04-0:08] Close-up of hand interacting with product — fingers press or touch the main surface. Room ambient light. No tripod. Organic movement.`
+      ),
+      makeScene(4, "REACTION",
+        `Selfie-mode smartphone shot — creator's face looking directly at front camera with genuine surprised/delighted expression, natural room ambient light, no ring light, casual bedroom background, authentic UGC. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Selfie mode — face directly to front camera, genuinely surprised or delighted. Room ambient light, not studio. Shoulders and head visible, naturally relaxed.`,
+        `[0:04-0:08] Camera slowly tilts down from selfie toward ${product} held below — face-to-product transition. Organic, one continuous motion.`
+      ),
+      makeScene(5, "RESULT + CTA",
+        `Handheld smartphone shot — ${product} held close to lens, creator's hand visible, warm natural backlight, slightly imperfect composition, product fills most of frame. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] ${product} held close to lens, hand visible. Camera slowly moves back — full product reveal. ${visualStyle}.`,
+        `[0:04-0:08] Still handheld, ${product} in frame against room or table background. Warm natural light.`
+      ),
+    ],
+    before_after: [
+      makeScene(1, "BEFORE",
+        `Selfie-mode or handheld POV smartphone shot — creator showing the 'before' condition in natural daylight, real bathroom/bedroom background, slightly dim and muted tone, relatable and authentic. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Selfie or close-up hand filming the before condition. Natural daylight, camera held slightly shaky. Muted tone, slightly dim. Looks real and relatable.`,
+        `[0:04-0:08] Camera slowly pans up and down to capture the "before" state. Handheld, slightly tilted. Real bedroom or bathroom background.`
+      ),
+      makeScene(2, "TRANSITION",
+        `Handheld smartphone — creator's hand covering lens then pulling away to reveal. Natural light shift between before/after. Organic transition, no digital effects. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Jump cut or hand covers lens then pulls away to reveal. Organic effect, no heavy digital transitions.`,
+        `[0:04-0:08] Camera lifts up then comes back down — simple hand-motion reveal. Transition feels natural, like the creator did it intentionally.`
+      ),
+      makeScene(3, "AFTER",
+        `Handheld smartphone POV — same angle as before, but now showing clear result after using ${product}. ${visualStyle}. Brighter natural light, creator's hand slightly trembling with excitement. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Same angle as BEFORE, but now the result from using ${product} is clearly visible. ${visualStyle}. Camera trembles slightly.`,
+        `[0:04-0:08] Close-up of hand or result area — camera held 5cm from subject. Autofocus hunts briefly then locks. Brighter natural light.`
+      ),
+      makeScene(4, "CLOSE-UP PROOF",
+        `Macro handheld smartphone shot — extreme close-up of the result after using ${product}, finger pointing or lightly touching to demonstrate. Natural ambient light, authentic texture, not CGI. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Macro shot of result using smartphone camera — hand holds area or product 5cm from lens. Autofocus hunting = authentic feel.`,
+        `[0:04-0:08] Finger points to or lightly touches the result area. Slight motion blur on movement. Window or warm ambient light.`
+      ),
+      makeScene(5, "CTA",
+        `Handheld overhead smartphone shot — ${product} placed on everyday table, creator's hand visible setting it down. Natural light from above, slightly imperfect composition, real-life surface. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Product placed on a plain table, filmed from above with one hand. ${visualStyle}.`,
+        `[0:04-0:08] Selfie mode — face and product in frame. Natural smile. Warm ambient light.`
+      ),
+    ],
+    lifestyle: [
+      makeScene(1, "OPENING",
+        `Handheld smartphone panning shot — everyday room/desk setting, ${product} sits naturally in frame among daily items. Morning or golden hour light, warm tones, no staging. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Everyday room or desk angle, ${product} in frame naturally. Camera pans slowly by hand — no gimbal. ${visualStyle}.`,
+        `[0:04-0:08] Hand enters frame, casually picking up or touching ${product}. Natural, unplanned movement. Warm morning light.`
+      ),
+      makeScene(2, "DAILY ROUTINE",
+        `First-person smartphone POV — creator integrating ${product} into daily routine, handheld one hand filming, slightly tilted casual framing, candid real-life moment, natural ambient light. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] POV — own hand using ${product} in daily routine. Selfie mode or held at an angle. Candid, not posed.`,
+        `[0:04-0:08] Routine continues — camera shifts slightly as it's held while doing something else. Authentic.`
+      ),
+      makeScene(3, "EMOTIONAL MOMENT",
+        `Intimate handheld close-up — creator's face or hands in warm afternoon window light, soft natural bokeh, no ring light, personal and candid feel. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Close-up of face or hands, afternoon window light. Camera held close — intimate and personal. No ring light.`,
+        `[0:04-0:08] Eyes or feel-good expression — camera very close to face, slight edge defocus. Warm natural light.`
+      ),
+      makeScene(4, "HERO SHOT",
+        `Handheld smartphone — ${product} held toward natural window light, camera positioned in front, natural bokeh background, organic sway. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Product held toward natural light, smartphone camera in front. Natural close-range bokeh. ${visualStyle}.`,
+        `[0:04-0:08] Hand slowly rotates product 45 degrees — light plays across the product surface. Organic natural sway.`
+      ),
+      makeScene(5, "OUTRO + CTA",
+        `Selfie-mode smartphone shot — creator smiling naturally at front camera, casual background, no professional lighting, warm and personal. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+        `[0:00-0:04] Selfie mode — natural smile to front camera. No perfect lighting needed. Real room or location background.`,
+        `[0:04-0:08] Product shown toward camera with a smile. Warm natural ambient light.`
+      ),
+    ],
+  };
+
+  const NEG = `❌ NEGATIVE PROMPT (must include):\nno talking, no speaking, no open mouth, no mouth movement, no dialogue, no lip sync, no lip movement, no voiceover, no subtitles, no captions overlay, no text on screen — MODEL RULE: if any male or female model appears in frame, they must NOT speak, open mouth, move lips, or dialogue in any form; model must remain completely silent — no smiling directly at camera, no posing, no staged expression, no looking at camera and smiling, no influencer pose, no fake laugh, no exaggerated reaction, no professional model behavior, no studio lighting, no tripod, no gimbal, no stabilized footage, no green screen, no CGI background, no watermark, no logo`;
+
+  const aiNotes = {
+    kling: `🎥 KLING AI — USAGE GUIDE:\n\n⚠️ IMPORTANT — WHY KLING FAILS WITH LONG PROMPTS:\nKling AI rejects prompts that are too long or descriptive. Each video prompt above has been automatically compressed to Kling-safe length (~40 words max).\n\n✅ HOW TO USE:\n1. Upload the IMAGE ANCHOR to Kling (Image-to-Video mode)\n2. Copy the KLING PROMPT text — paste directly into Kling's prompt field\n3. Paste the NEGATIVE section into Kling's negative prompt field\n4. Settings: Duration 5s, Creativity Medium, Camera Movement: Handheld / None\n5. Do NOT add extra description — keep prompts short\n\n📐 Settings:\n- Mode: Image-to-Video\n- Aspect ratio: ${ratio}\n- Motion: ${tone==="energetic"?"Fast":"Slow/Natural"}\n- Camera shake: ON\n- Duration: 5s per clip`,
+    runway:     `🎥 RUNWAY GEN-3:\n- Mode: Text-to-Video / Image-to-Video\n- Camera: handheld natural sway, organic motion — avoid stabilized look\n- Add to prompt: "shot on smartphone, UGC aesthetic, natural ambient light"\n- Duration: ${duration}\n\n${NEG}`,
+    midjourney: `🖼️ MIDJOURNEY:\n- --ar ${ratio.replace("/",":")} --style raw --stylize 400 --v 6.1\n- Add: "shot on iPhone, handheld, natural room lighting, UGC aesthetic, ${visualStyle}"\n- Avoid: "studio", "commercial", "professional photography"\n\n${NEG.replace("❌ NEGATIVE PROMPT (must include):","❌ NEGATIVE PROMPT (add after --no):")}`,
+    flux:       `🖼️ FLUX:\n- Model: Flux Pro  CFG: 5-6  Steps: 25-35\n- Add prompt: "shot on smartphone, slightly imperfect, handheld, natural light"\n- Resolution: ${ratio==="9:16"?"768x1344":"1024x1024"}\n\n${NEG}`,
+    pika:       `🎥 PIKA LABS:\n- Aspect ratio: ${ratio}\n- Motion: ${tone==="energetic"?"High (8-10)":"Medium (4-6)"} — set camera shake ON\n- Add: "handheld smartphone footage, organic movement"\n\n${NEG}`,
+    sora:       `🎥 SORA:\n- Preset: UGC / Handheld  Duration: ${duration}\n- Style: "shot on smartphone, ${visualStyle}, handheld camera, natural light"\n\n${NEG}`,
+    auto:       `⚙️ UNIVERSAL:\n- Video: Kling / Runway / Pika — always enable camera shake / handheld mode\n- Image: Midjourney v6 / Flux Pro — add "shot on smartphone, UGC aesthetic"\n- Aspect ratio: ${ratio}\n- Key phrase to add everywhere: "handheld, natural ambient light, organic motion"\n\n${NEG}`,
+  };
+
+  const bagShots = [
+    makeScene(1, "INTRO — BAG ON TABLE",
+      `Photorealistic, shot on smartphone, handheld UGC — ${product} placed on a wooden table or marble surface, natural daylight from window illuminating leather/fabric texture, hardware details visible. Slightly imperfect framing, no mannequin, no stand. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Handheld smartphone — slow side-to-side pan across ${product} placed on table. Natural light highlights material and hardware. Slight organic sway, no gimbal.`,
+      `[0:04-0:08] Camera dips closer to hardware detail — close-up on clasp, zipper pull, logo, or stitching. Autofocus hunts then locks on best detail. Warm window light.`
+    ),
+    makeScene(2, "HARDWARE & ZIPPER DETAIL",
+      `Macro close-up, shot on smartphone, handheld — extreme close-up of ${product} hardware details: zipper pull, metal clasp, stitching edges, logo embossing. Natural side lighting reveals texture depth, soft bokeh background. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Macro shot — finger touches or taps ${product} hardware (zipper, clasp, logo). Camera very close, autofocus hunts briefly then locks. Natural side light reveals material texture depth.`,
+      `[0:04-0:08] Hand slowly pulls zipper or opens flap — close-up of opening motion. Slight motion blur on hand movement. Material quality revealed up close. Natural light.`
+    ),
+    makeScene(3, "EXTERIOR REVEAL — HAND LIFT",
+      `Handheld smartphone POV — hand lifting ${product} toward camera, rotating slowly to show all angles, natural ambient light creating soft shadows, authentic product hold, UGC feel. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Hand lifts ${product} from below frame toward camera — front face revealed. Handheld camera follows hand motion slightly. Slow 90-degree rotation shows side and bottom.`,
+      `[0:04-0:08] Hand flips ${product} to reveal back and bottom. Close-up on bottom detail (base studs, feet) or side panel. Natural light plays across material.`
+    ),
+    makeScene(4, "INTERIOR REVEAL",
+      `Handheld smartphone POV — hand opening ${product} wide toward camera, interior lining and compartments visible, natural top-down or angled light illuminating inside, authentic UGC feel. ${visualStyle}. --ar ${ratio.replace("/",":")} --style raw --v 6.1`,
+      `[0:00-0:04] Hand opens ${product} wide toward camera — interior reveal. Shows inner lining, pockets, and compartments. Camera slightly overhead. Natural light enters the bag.`,
+      `[0:04-0:08] Camera pulls out from interior to full exterior shot. ${visualStyle}. Hand holds bag toward camera — final hero shot.`
+    ),
+  ];
+
+  const shotList = niche === "fashion"
+    ? (fashionSub === "bag" ? bagShots : fashionShots).join("\n\n")
+    : (shots[contentType] || shots.review).join("\n\n");
+  const aiNote   = aiNotes[aiGen] || aiNotes.auto;
+
+  const introVideo = isKling
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINTRO VIDEO PROMPT — SCENE 0 (HOOK)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🎬 KLING PROMPT — Shot A:\n${product} lifted toward camera from below, handheld arm shake, natural window light, UGC\n\n🎬 KLING PROMPT — Shot B:\nclose-up product held toward lens, fingers visible, autofocus lock, warm ambient light, smartphone POV\n\n❌ NEGATIVE: ${NEG_SHORT}`
+    : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINTRO VIDEO PROMPT — SCENE 0 (HOOK)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\`\`\`\n[0:00-0:04] Handheld smartphone POV — camera starts half-hidden, then ${product} is slowly lifted toward the lens from below frame. Natural window light. Organic movement, slight shake. Real room or table background.\n\n[0:04-0:08] Camera slowly zooms in on ${product} — hand maintains hold, fingers visible. Autofocus hunts briefly then locks. ${visualStyle}.\n\`\`\`\n\n❌ NEGATIVE PROMPT:\nno talking, no speaking, no open mouth, no mouth movement, no dialogue, no lip sync, no lip movement — IF any male or female model appears: model must NOT speak or open mouth at all, completely silent; no smiling at camera, no posing, no looking directly at camera, no influencer pose, no fake reaction, no studio lighting, no tripod, no watermark\n\n💡 Intro Tips:\n• Ideal intro duration: 2–4 seconds\n• Goal: stop the scroll within the first second\n• Always start with movement — not a static product shot\n• Use visual curiosity rather than text hooks`;
+
+  return {
+    image: `Photorealistic product photo, ${nicheLabel} category, ${product}. ${visualStyle}. Shot on smartphone camera, slightly imperfect composition, natural ambient lighting (window light or room light), handheld feel with subtle motion, authentic UGC aesthetic — NOT studio photography. Aspect ratio ${ratio}. --ar ${ratio.replace("/","").replace(" ","")} --style raw --v 6.1`,
+    introVideo,
+    video: `══════════════════════════════════\n🎯 MASTER PROMPT — ${contentLabel.toUpperCase()}\n══════════════════════════════════\n${isKling ? "\n⚠️  KLING MODE — All video prompts are compressed to max 35 words per shot. No timestamps. Paste each shot directly into Kling's prompt field.\n" : ""}\nPRODUCT   : ${product}\nBENEFIT   : ${benefit}\nNICHE     : ${nicheLabel}\nPLATFORM  : ${platformLabel} (${ratio} | ${duration})\nTONE      : ${toneLabel}\nAI TOOL   : ${aiLabel}\nSTYLE     : Handheld Smartphone / Natural UGC\n\n──────────────────────────────────\nSHOT-BY-SHOT SEQUENCE\n──────────────────────────────────\n\n${shotList}\n\n──────────────────────────────────\nAI SETTINGS\n──────────────────────────────────\n${aiNote}\n\n──────────────────────────────────\nSMARTPHONE UGC TIPS\n──────────────────────────────────\n• Always add: "handheld", "shot on smartphone", "natural light" to every prompt\n• Avoid: "cinematic", "studio lighting", "dolly shot", "professional"\n• Use natural indoor/outdoor backgrounds — not plain backdrops\n• Let framing be slightly tilted or imperfect — that's what makes content feel real\n• Export final at native platform resolution (${ratio})`,
+    caption: `🔥 "I was honestly shocked by the results of ${product}..."\n\nAfter [X days] of using it, here's what I noticed:\n✅ ${benefit}\n✅ [Benefit #2]\n✅ [Benefit #3]\n\nYou have to try this yourself. Link in bio! 👇\n\n#${product.replace(/\s+/g,"")} #${nicheLabel.replace(/[\s&]+/g,"")} #UGC #AffiliateMarketing #${platformLabel.replace(/\s+/g,"")}`,
+  };
+}
+
+function getMediaType(b64) {
+  const sig = b64.substring(0, 16);
+  if (sig.startsWith("/9j")) return "image/jpeg";
+  if (sig.startsWith("iVBOR")) return "image/png";
+  if (sig.startsWith("R0lGO")) return "image/gif";
+  if (sig.startsWith("UklGR")) return "image/webp";
+  return "image/jpeg";
+}
+
+async function buildAIPrompt({ imgB64, niche, fashionSub, platform, contentType, aiGen, tone, productName, productBenefit }) {
+  const nicheObj    = NICHES.find(n => n.id === niche);
+  const platformObj = PLATFORMS.find(p => p.id === platform);
+  const toneObj     = TONES.find(t => t.id === tone);
+  const aiObj       = AI_GENERATORS.find(a => a.id === aiGen);
+  const contentObj  = CONTENT_TYPES.find(c => c.id === contentType);
+
+  const isKlingAI = aiObj?.id === "kling";
+  const totalScenes = niche === "fashion" ? 4 : 5;
+
+  const klingIntroNote = isKlingAI ? " KLING MODE: Shot A and Shot B must each be MAX 35 WORDS, no timestamps." : "";
+
+  const klingIntroFormat = isKlingAI
+    ? "🎬 KLING PROMPT — Shot A:\n[max 35 words — product reveal action, handheld, natural light, UGC keywords]\n\n🎬 KLING PROMPT — Shot B:\n[max 35 words — close-up or hold, autofocus lock, warm light, smartphone POV]\n\n❌ NEGATIVE: no speech, no open mouth, no lip movement, no text, no studio light, no tripod, no gimbal"
+    : "```\n[0:00-0:04] [handheld action that grabs attention — product reveal from below frame, hand motion, or dramatic lift toward camera. Natural light. Organic shake. No text overlay.]\n\n[0:04-0:08] [continuation — autofocus lock, slight zoom, hold on product]\n```\n\n❌ NEGATIVE PROMPT:\nno talking, no speaking, no mouth movement, no dialogue, no lip sync, no smiling at camera, no posing, no looking directly at camera, no influencer pose, no fake reaction, no studio lighting, no tripod, no watermark\n\n💡 Intro Tips:\n• Ideal intro duration: 2–4 seconds\n• Goal: stop the scroll within the first second\n• Always start with movement — not a static product shot\n• Use visual curiosity rather than text hooks";
+
+  const klingModeRules = isKlingAI
+    ? "\n\n⚠️ KLING AI MODE — STRICT RULES:\n- Each sub-shot prompt must be MAX 35 WORDS — Kling rejects long prompts\n- NO timestamps (no [0:00-0:03] etc)\n- NO narrative sentences — use comma-separated visual keywords only\n- Format each shot as: \"[subject] [action], [camera], [lighting], [style keywords]\""
+    : "";
+
+  const klingSceneFormat = isKlingAI
+    ? "🖼️ IMAGE ANCHOR (upload to Kling):\n[image prompt]\n\n🎬 KLING PROMPT — Shot A:\n[max 35 words, no timestamp, visual keywords only]\n\n🎬 KLING PROMPT — Shot B:\n[max 35 words, no timestamp, visual keywords only]\n\n❌ NEGATIVE: no speech, no open mouth, no lip movement, no text, no studio light, no tripod, no gimbal"
+    : `🖼️ IMAGE ANCHOR:\n[One-sentence photorealistic image prompt. Include: exact product details, setting, "shot on smartphone", "handheld", "natural ambient lighting", "UGC aesthetic", "--ar ${platformObj?.ratio?.replace("/",":") || "9:16"} --style raw --v 6.1"]\n\n\`\`\`\n[0:00-0:04] [sub-shot A description with camera movement]\n\n[0:04-0:08] [sub-shot B description with camera movement]\n\`\`\``;
+
+  const klingRules = isKlingAI
+    ? "- Each scene has: 🖼️ IMAGE ANCHOR + 🎬 KLING PROMPT — Shot A + 🎬 KLING PROMPT — Shot B + ❌ NEGATIVE\n- Each shot: MAX 35 WORDS, no timestamps, comma-separated visual keywords only"
+    : "- Each scene has 1 Image Anchor + 2 sub-shots inside triple backticks\n- After the closing triple backtick of each scene, add the ❌ NEGATIVE PROMPT block\n- Each scene is exactly 8 seconds total: Shot A [0:00-0:04], Shot B [0:04-0:08]";
+
+  const fashionSubRules = niche === "fashion" && fashionSub === "clothing"
+    ? "- CLOTHING SCENES: Scene 1=Item on table, Scene 2=Model selfie recording, Scene 3=Outdoor wide static, Scene 4=Candid wide static"
+    : niche === "fashion" && fashionSub === "bag"
+    ? "- BAG SCENES: Scene 1=Bag on table, Scene 2=Hardware/zipper detail, Scene 3=Exterior reveal hand lift, Scene 4=Interior reveal"
+    : "";
+
+  const system = `You are a professional UGC (User Generated Content) prompt engineer specializing in affiliate marketing content for social media platforms. You create detailed, actionable prompts for AI video and image generators that produce authentic, smartphone-style UGC content.
+
+Input details:
+- Niche: ${nicheObj?.label}
+- Platform: ${platformObj?.label} (${platformObj?.ratio}, ${platformObj?.duration})
+- Content type: ${contentObj?.label}
+- Tone: ${toneObj?.label} — ${toneObj?.style}
+- AI Generator: ${aiObj?.label}
+- Product name: ${productName || "from image"}
+- Key benefit: ${productBenefit || "from image"}
+
+CRITICAL STYLE RULE: All prompts must look like they were filmed on a smartphone by a real person — NOT a professional production.
+
+Analyze the product photo carefully. Note: exact color, material finish, hardware color, design features, stitching, handle style, size impression.
+
+NEGATIVE PROMPT RULE: Every video prompt must end with:
+❌ NEGATIVE PROMPT:
+no talking, no speaking, no open mouth, no mouth movement, no dialogue, no lip sync, no lip movement, no voiceover, no subtitles, no text on screen, no smiling directly at camera, no posing, no staged expression, no influencer pose, no studio lighting, no tripod, no gimbal, no watermark, no logo
+
+Generate FOUR outputs:
+
+1. IMAGE_PROMPT (English, 80-120 words): Photorealistic AI image prompt for ${aiObj?.label}. Include: "shot on smartphone", "handheld", "natural ambient lighting", "UGC aesthetic". Include exact product description from photo, real-life setting, aspect ratio ${platformObj?.ratio}.
+
+2. INTRO_VIDEO_PROMPT (English): A short 2-4 second intro/hook sequence.${klingIntroNote} Structure:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INTRO VIDEO PROMPT — SCENE 0 (HOOK)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${klingIntroFormat}
+
+3. VIDEO_PROMPT (English): Structure as SCENES. Each scene has exactly 2 sub-shots.${klingModeRules} Format strictly as follows (repeat for all ${totalScenes} scenes):
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCENE [N] — [LABEL]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${klingSceneFormat}
+
+Rules for VIDEO_PROMPT:
+- Total ${totalScenes} scenes covering ${platformObj?.duration}
+${klingRules}
+${fashionSubRules}
+- NO professional terms: no "dolly", "crane shot", "studio lighting", "gimbal"
+
+4. CAPTION (English): Ready-to-post. Start with a relatable hook, 3 bullet benefits with checkmarks, CTA "link in bio", relevant hashtags.
+
+Respond ONLY as valid JSON (no markdown, no extra text):
+{"image":"...","introVideo":"...","video":"...","caption":"..."}`;
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 8000,
+      system,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: getMediaType(imgB64), data: imgB64 } },
+          { type: "text", text: "Analyze this product and generate the three prompts." }
+        ]
+      }]
+    })
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || "API error");
+
+  const raw = data.content.map(b => b.text || "").join("");
+  let clean = raw.replace(/```json|```/g, "").trim();
+  const start = clean.indexOf("{");
+  let end = clean.lastIndexOf("}");
+  if (start === -1) throw new Error("No JSON found in AI response.");
+  if (end === -1) {
+    clean = clean.slice(start);
+    let inStr = false, escaped = false;
+    for (let i = 0; i < clean.length; i++) {
+      const ch = clean[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') inStr = !inStr;
+    }
+    if (inStr) clean += '"';
+    clean += "}";
+    end = clean.length - 1;
+  }
+  clean = clean.slice(start, end + 1);
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    const extract = (key) => {
+      const rx = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\[\\s\\S])*)"`, "s");
+      const m  = clean.match(rx);
+      return m ? m[1].replace(/\\n/g, "\n").replace(/\\"/g, '"') : `[Failed to parse field: ${key}]`;
+    };
+    return { image: extract("image"), introVideo: extract("introVideo"), video: extract("video"), caption: extract("caption") };
+  }
+}
+
+const gold  = "#c8a060";
+const gold2 = "#e8b840";
+const dark  = "#0a0a0f";
+
+export default function App() {
+  const [step,      setStep]      = useState(0);
+  const [imgB64,    setImgB64]    = useState(null);
+  const [imgSrc,    setImgSrc]    = useState(null);
+  const [isDrag,    setIsDrag]    = useState(false);
+  const [loading,   setLoading]   = useState(false);
+  const [result,    setResult]    = useState(null);
+  const [activeTab, setActiveTab] = useState("intro");
+  const [copied,    setCopied]    = useState("");
+  const [form,      setForm]      = useState({ niche:"", fashionSub:"", platform:"", contentType:"", aiGen:"", tone:"", productName:"", productBenefit:"" });
+  const fileRef = useRef();
+
+  const set = (k,v) => setForm(f => ({ ...f, [k]:v }));
+
+  const handleFile = file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const url = ev.target.result;
+      setImgSrc(url);
+      setImgB64(url.split(",")[1]);
+      setStep(1);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const isFashion = form.niche === "fashion";
+  const LAST_STEP = isFashion ? 8 : 7;
+
+  const canNext = () => {
+    if (step === 1) return !!form.niche;
+    if (step === 2) return isFashion ? !!form.fashionSub : !!form.platform;
+    if (step === 3) return isFashion ? !!form.platform : !!form.contentType;
+    if (step === 4) return isFashion ? !!form.contentType : !!form.aiGen;
+    if (step === 5) return isFashion ? !!form.aiGen : !!form.tone;
+    if (step === 6) return isFashion ? !!form.tone : form.productName.trim().length > 0;
+    if (step === 7) return isFashion ? form.productName.trim().length > 0 : true;
+    return true;
+  };
+
+  const handleGenerate = async () => {
+    setLoading(true);
+    try {
+      const prompts = imgB64
+        ? await buildAIPrompt({ imgB64, ...form })
+        : buildStaticPrompt(form);
+      setResult(prompts);
+      setActiveTab("intro");
+    } catch (err) {
+      const msg = `Generate failed: ${err.message || "Unknown error"}.\n\nClick "New Prompt" and try again.`;
+      setResult({ image: msg, introVideo: msg, video: msg, caption: msg });
+    }
+    setLoading(false);
+  };
+
+  const reset = () => {
+    setStep(0); setImgB64(null); setImgSrc(null); setResult(null); setLoading(false);
+    setForm({ niche:"", fashionSub:"", platform:"", contentType:"", aiGen:"", tone:"", productName:"", productBenefit:"" });
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const nextStep = () => {
+    if (step === LAST_STEP) { handleGenerate(); return; }
+    if (!isFashion && step === 1) { setStep(3); return; }
+    setStep(s => s + 1);
+  };
+
+  const appStyle = {
+    minHeight:"100vh",
+    background:`linear-gradient(160deg, ${dark} 0%, #111118 60%, #0d1020 100%)`,
+    fontFamily:"'Georgia',serif", color:"#e8e0d0",
+    display:"flex", flexDirection:"column", alignItems:"center",
+  };
+  const headerStyle = {
+    width:"100%", background:"linear-gradient(90deg,#12101a,#0d1525)",
+    borderBottom:"1px solid rgba(255,200,100,0.12)",
+    padding:"24px 20px 18px", textAlign:"center",
+  };
+  const bodyStyle = { width:"100%", maxWidth:620, padding:"0 18px 48px" };
+
+  if (loading) return (
+    <div style={appStyle}>
+      <div style={headerStyle}>
+        <div style={{ fontSize:10, letterSpacing:6, color:gold, textTransform:"uppercase", marginBottom:8 }}>AI Content Studio</div>
+        <h1 style={{ margin:0, fontSize:"clamp(20px,5vw,32px)", background:`linear-gradient(135deg,#f0c060,#e0a040,#c0784a)`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", fontWeight:"400", letterSpacing:2 }}>Affiliate & UGC Prompt Generator</h1>
+      </div>
+      <div style={{ ...bodyStyle, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", paddingTop:80, gap:20 }}>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        <div style={{ width:40, height:40, border:"2px solid rgba(200,160,80,0.3)", borderTopColor:gold, borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+        <div style={{ fontSize:13, color:"#8899aa", letterSpacing:2, textTransform:"uppercase" }}>
+          {imgB64 ? "Analyzing product with AI..." : "Building prompt..."}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (result) {
+    const tabs = [{ key:"intro", label:"Intro" }, { key:"video", label:"Video Prompt" }, { key:"caption", label:"Caption" }];
+    const introContent = result.intro || (
+      `🖼️ IMAGE PROMPT\n${"─".repeat(36)}\n${result.image || ""}\n\n` +
+      `🎬 INTRO VIDEO PROMPT\n${"─".repeat(36)}\n${result.introVideo || ""}`
+    );
+    const displayContent = activeTab === "intro" ? introContent : result[activeTab];
+    const copyContent = activeTab === "intro" ? introContent : result[activeTab];
+
+    return (
+      <div style={appStyle}>
+        <div style={headerStyle}>
+          <div style={{ fontSize:10, letterSpacing:6, color:gold, textTransform:"uppercase", marginBottom:8 }}>AI Content Studio</div>
+          <h1 style={{ margin:0, fontSize:"clamp(20px,5vw,32px)", background:`linear-gradient(135deg,#f0c060,#e0a040,#c0784a)`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", fontWeight:"400", letterSpacing:2 }}>Affiliate & UGC Prompt Generator</h1>
+          <p style={{ margin:"6px 0 0", fontSize:11, color:"#8899aa", letterSpacing:1 }}>Ready-to-use output</p>
+        </div>
+        <div style={bodyStyle}>
+          {imgSrc && (
+            <div style={{ marginTop:20, borderRadius:10, overflow:"hidden", border:"1px solid rgba(255,255,255,0.08)", maxHeight:180 }}>
+              <img src={imgSrc} alt="product" style={{ width:"100%", objectFit:"cover", display:"block", maxHeight:180 }} />
+            </div>
+          )}
+          <div style={{ display:"flex", gap:8, marginTop:18 }}>
+            {tabs.map(t => (
+              <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+                flex:1, padding:"9px 4px", borderRadius:8, cursor:"pointer", fontSize:12, letterSpacing:1,
+                border: activeTab===t.key ? `1px solid rgba(200,160,80,0.5)` : "1px solid rgba(255,255,255,0.08)",
+                background: activeTab===t.key ? "rgba(200,160,80,0.12)" : "rgba(255,255,255,0.03)",
+                color: activeTab===t.key ? gold : "#8899aa",
+                fontFamily:"inherit", transition:"all 0.15s",
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {activeTab === "intro" ? (
+            <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:10 }}>
+              <div style={{ position:"relative" }}>
+                <div style={{ fontSize:10, letterSpacing:3, color:gold, textTransform:"uppercase", marginBottom:6 }}>🖼️ Image Prompt</div>
+                <pre style={{ background:"rgba(0,0,0,0.35)", border:"1px solid rgba(200,160,80,0.12)", borderRadius:12, padding:"14px 14px 48px", fontSize:12, lineHeight:1.75, color:"#d0c8b0", whiteSpace:"pre-wrap", wordBreak:"break-word", fontFamily:"'Courier New',monospace", maxHeight:"28vh", overflowY:"auto", margin:0 }}>{result.image || ""}</pre>
+                <button onClick={() => { navigator.clipboard.writeText(result.image||""); setCopied("img"); setTimeout(()=>setCopied(""),2000); }} style={{ position:"absolute", bottom:12, right:12, padding:"5px 14px", borderRadius:6, cursor:"pointer", background: copied==="img" ? "rgba(100,200,100,0.2)" : "rgba(200,160,80,0.15)", border: `1px solid ${copied==="img" ? "rgba(100,200,100,0.4)" : "rgba(200,160,80,0.3)"}`, color: copied==="img" ? "#88ee88" : gold, fontSize:11, letterSpacing:1, fontFamily:"inherit" }}>{copied==="img" ? "✓ Copied" : "Copy"}</button>
+              </div>
+              <div style={{ position:"relative" }}>
+                <div style={{ fontSize:10, letterSpacing:3, color:gold, textTransform:"uppercase", marginBottom:6 }}>🎬 Intro Video Prompt</div>
+                <pre style={{ background:"rgba(0,0,0,0.35)", border:"1px solid rgba(200,160,80,0.12)", borderRadius:12, padding:"14px 14px 48px", fontSize:12, lineHeight:1.75, color:"#d0c8b0", whiteSpace:"pre-wrap", wordBreak:"break-word", fontFamily:"'Courier New',monospace", maxHeight:"28vh", overflowY:"auto", margin:0 }}>{result.introVideo || ""}</pre>
+                <button onClick={() => { navigator.clipboard.writeText(result.introVideo||""); setCopied("ivid"); setTimeout(()=>setCopied(""),2000); }} style={{ position:"absolute", bottom:12, right:12, padding:"5px 14px", borderRadius:6, cursor:"pointer", background: copied==="ivid" ? "rgba(100,200,100,0.2)" : "rgba(200,160,80,0.15)", border: `1px solid ${copied==="ivid" ? "rgba(100,200,100,0.4)" : "rgba(200,160,80,0.3)"}`, color: copied==="ivid" ? "#88ee88" : gold, fontSize:11, letterSpacing:1, fontFamily:"inherit" }}>{copied==="ivid" ? "✓ Copied" : "Copy"}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop:10, position:"relative" }}>
+              <pre style={{ background:"rgba(0,0,0,0.35)", border:"1px solid rgba(200,160,80,0.12)", borderRadius:12, padding:"16px 16px 52px", fontSize:12, lineHeight:1.75, color:"#d0c8b0", whiteSpace:"pre-wrap", wordBreak:"break-word", fontFamily:"'Courier New',monospace", maxHeight:"55vh", overflowY:"auto", margin:0 }}>{displayContent}</pre>
+              <button onClick={() => { navigator.clipboard.writeText(copyContent); setCopied(activeTab); setTimeout(()=>setCopied(""),2000); }} style={{ position:"absolute", bottom:12, right:12, padding:"6px 16px", borderRadius:6, cursor:"pointer", background: copied===activeTab ? "rgba(100,200,100,0.2)" : "rgba(200,160,80,0.15)", border: `1px solid ${copied===activeTab ? "rgba(100,200,100,0.4)" : "rgba(200,160,80,0.3)"}`, color: copied===activeTab ? "#88ee88" : gold, fontSize:11, letterSpacing:1, fontFamily:"inherit" }}>{copied===activeTab ? "✓ Copied" : "Copy"}</button>
+            </div>
+          )}
+
+          <button onClick={reset} style={{ marginTop:14, width:"100%", padding:"12px", borderRadius:10, background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#8899aa", cursor:"pointer", fontSize:13, letterSpacing:1, fontFamily:"inherit" }}>↺ New Prompt</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={appStyle}>
+      <div style={headerStyle}>
+        <div style={{ fontSize:10, letterSpacing:6, color:gold, textTransform:"uppercase", marginBottom:8 }}>AI Content Studio</div>
+        <h1 style={{ margin:0, fontSize:"clamp(20px,5vw,32px)", background:`linear-gradient(135deg,#f0c060,#e0a040,#c0784a)`, WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", fontWeight:"400", letterSpacing:2 }}>Affiliate & UGC Prompt Generator</h1>
+        <p style={{ margin:"6px 0 0", fontSize:11, color:"#8899aa", letterSpacing:1 }}>Multi-platform · AI-powered · Ready to use</p>
+      </div>
+
+      <div style={{ width:"100%", maxWidth:620, padding:"16px 18px 0" }}>
+        <div style={{ display:"flex", gap:3 }}>
+          {STEPS.map((label,i) => (
+            <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+              <div style={{ height:2.5, width:"100%", borderRadius:2, background: i<=step ? `linear-gradient(90deg,${gold},${gold2})` : "rgba(255,255,255,0.07)", transition:"all 0.3s" }} />
+              <span style={{ fontSize:8, color: i===step ? gold : "#334455", letterSpacing:1, textTransform:"uppercase" }}>{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={bodyStyle}>
+
+        {step === 0 && (
+          <Sec title="Upload Product Photo" sub="Optional — AI will auto-analyze product details">
+            <input type="file" accept="image/*" ref={fileRef} style={{ display:"none" }}
+              onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
+            <div
+              onClick={() => fileRef.current.click()}
+              onDragOver={e => { e.preventDefault(); setIsDrag(true); }}
+              onDragLeave={() => setIsDrag(false)}
+              onDrop={e => { e.preventDefault(); setIsDrag(false); e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]); }}
+              style={{ border:`1.5px dashed ${isDrag ? gold : "rgba(200,160,80,0.25)"}`, borderRadius:12, padding:"40px 20px", textAlign:"center", cursor:"pointer", background: isDrag ? "rgba(200,160,80,0.06)" : "rgba(255,255,255,0.02)", transition:"all 0.2s" }}>
+              <div style={{ fontSize:32, marginBottom:10 }}>📷</div>
+              <div style={{ fontSize:15, color:gold, marginBottom:6 }}>Tap or drag product photo here</div>
+              <div style={{ fontSize:12, color:"#445566" }}>JPG · PNG · WEBP — AI reads product details automatically</div>
+            </div>
+            <div onClick={() => setStep(1)} style={{ textAlign:"center", padding:"14px", borderRadius:10, border:"1px solid rgba(255,255,255,0.06)", background:"rgba(255,255,255,0.02)", cursor:"pointer", color:"#667788", fontSize:13, letterSpacing:1 }}>Skip — enter product name manually →</div>
+          </Sec>
+        )}
+
+        {step === 1 && (
+          <Sec title="Select Niche" sub="Category of product being promoted">
+            {imgSrc && <ThumbImg src={imgSrc} />}
+            {NICHES.map(n => (
+              <Card key={n.id} selected={form.niche===n.id} onClick={() => set("niche",n.id)} accent={n.color}>
+                <span style={{ fontSize:22 }}>{n.emoji}</span>
+                <span style={{ fontSize:15, fontWeight:500 }}>{n.label}</span>
+              </Card>
+            ))}
+          </Sec>
+        )}
+
+        {step === 2 && isFashion && (
+          <Sec title="Fashion Product Type" sub="Select the specific product category">
+            {imgSrc && <ThumbImg src={imgSrc} />}
+            {FASHION_SUBCATEGORIES.map(s => (
+              <Card key={s.id} selected={form.fashionSub===s.id} onClick={() => set("fashionSub", s.id)} accent="#b5c9f7">
+                <span style={{ fontSize:26 }}>{s.emoji}</span>
+                <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                  <span style={{ fontSize:15, fontWeight:500 }}>{s.label}</span>
+                  <span style={{ fontSize:11, color:"#8899aa" }}>{s.desc}</span>
+                </div>
+              </Card>
+            ))}
+          </Sec>
+        )}
+
+        {((isFashion && step === 3) || (!isFashion && step === 2)) && (
+          <Sec title="Target Platform" sub="Where will this content be published?">
+            {PLATFORMS.map(p => (
+              <Card key={p.id} selected={form.platform===p.id} onClick={() => set("platform",p.id)}>
+                <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                  <span style={{ fontSize:15, fontWeight:500 }}>{p.label}</span>
+                  <span style={{ fontSize:11, color:"#8899aa" }}>{p.ratio} · {p.duration}</span>
+                </div>
+              </Card>
+            ))}
+          </Sec>
+        )}
+
+        {((isFashion && step === 4) || (!isFashion && step === 3)) && (
+          <Sec title="Content Type" sub="Storytelling format for the video">
+            {CONTENT_TYPES.map(c => (
+              <Card key={c.id} selected={form.contentType===c.id} onClick={() => set("contentType",c.id)}>
+                <span style={{ fontSize:22 }}>{c.icon}</span>
+                <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                  <span style={{ fontSize:15, fontWeight:500 }}>{c.label}</span>
+                  <span style={{ fontSize:11, color:"#8899aa" }}>{c.desc}</span>
+                </div>
+              </Card>
+            ))}
+          </Sec>
+        )}
+
+        {((isFashion && step === 5) || (!isFashion && step === 4)) && (
+          <Sec title="AI Generator" sub="Which AI tool will you be using?">
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {AI_GENERATORS.map(a => (
+                <div key={a.id} onClick={() => set("aiGen",a.id)} style={{
+                  padding:"14px", borderRadius:10, cursor:"pointer",
+                  border: form.aiGen===a.id ? `1px solid ${gold}` : "1px solid rgba(255,255,255,0.07)",
+                  background: form.aiGen===a.id ? "rgba(200,160,80,0.1)" : "rgba(255,255,255,0.02)",
+                  transition:"all 0.18s",
+                }}>
+                  <div style={{ fontSize:13, fontWeight:500, color: form.aiGen===a.id?"#e8c070":"#ccc", marginBottom:4 }}>{a.label}</div>
+                  <div style={{ fontSize:10, letterSpacing:1, textTransform:"uppercase", color: a.type==="video"?"#88bbff":a.type==="image"?"#ff99cc":"#aaccaa" }}>
+                    {a.type==="both"?"Video & Image":a.type}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Sec>
+        )}
+
+        {((isFashion && step === 6) || (!isFashion && step === 5)) && (
+          <Sec title="Tone & Vibe" sub="Visual character and content narrative">
+            {TONES.map(t => (
+              <Card key={t.id} selected={form.tone===t.id} onClick={() => set("tone",t.id)}>
+                <span style={{ fontSize:15, fontWeight:500 }}>{t.label}</span>
+              </Card>
+            ))}
+          </Sec>
+        )}
+
+        {((isFashion && step === 7) || (!isFashion && step === 6)) && (
+          <Sec title="Product Info" sub="Specific details of the product being promoted">
+            {imgSrc && <ThumbImg src={imgSrc} />}
+            {imgSrc && <div style={{ fontSize:12, color:"#55aa77", padding:"8px 12px", borderRadius:8, background:"rgba(80,180,100,0.08)", border:"1px solid rgba(80,180,100,0.2)", marginBottom:4 }}>✓ Photo uploaded — AI will automatically analyze product visuals</div>}
+            <Field label="Product Name *" value={form.productName} onChange={v => set("productName",v)} placeholder="e.g. Mini Bow Slingbag Chocolate" />
+            <Field label="Key Benefit" value={form.productBenefit} onChange={v => set("productBenefit",v)} placeholder="e.g. Spacious, lightweight, perfect for daily use" />
+          </Sec>
+        )}
+
+        {((isFashion && step === 8) || (!isFashion && step === 7)) && (
+          <Sec title="Confirm" sub="Review before generating">
+            {imgSrc && <ThumbImg src={imgSrc} />}
+            <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+              {[
+                ["Product Photo", imgSrc ? "✓ Uploaded — AI auto-analysis" : "Not uploaded (manual)"],
+                ["Niche",       NICHES.find(n=>n.id===form.niche)?.label],
+                ...(form.niche==="fashion" ? [["Category", FASHION_SUBCATEGORIES.find(s=>s.id===form.fashionSub)?.label || "—"]] : []),
+                ["Platform",    PLATFORMS.find(p=>p.id===form.platform)?.label],
+                ["Content",      CONTENT_TYPES.find(c=>c.id===form.contentType)?.label],
+                ["AI Tool",     AI_GENERATORS.find(a=>a.id===form.aiGen)?.label],
+                ["Tone",        TONES.find(t=>t.id===form.tone)?.label],
+                ["Product",      form.productName || "—"],
+                ["Benefit",     form.productBenefit || "—"],
+              ].map(([k,v]) => (
+                <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 12px", background:"rgba(255,255,255,0.03)", borderRadius:8, border:"1px solid rgba(255,255,255,0.05)" }}>
+                  <span style={{ fontSize:11, color:"#8899aa", textTransform:"uppercase", letterSpacing:1 }}>{k}</span>
+                  <span style={{ fontSize:12, color: k==="Product Photo"&&imgSrc?"#88cc88":"#e0d0b0", fontWeight:500, maxWidth:"58%", textAlign:"right" }}>{v||"—"}</span>
+                </div>
+              ))}
+            </div>
+          </Sec>
+        )}
+
+        {step > 0 && (
+          <div style={{ display:"flex", gap:10, marginTop:22 }}>
+            <button onClick={() => {
+              if (!isFashion && step === 3) { setStep(1); return; }
+              setStep(s => s - 1);
+            }} style={{ flex:1, padding:"13px", borderRadius:10, cursor:"pointer", background:"transparent", border:"1px solid rgba(255,255,255,0.1)", color:"#8899aa", fontSize:13, letterSpacing:1, fontFamily:"inherit" }}>← Back</button>
+            <button onClick={nextStep} disabled={!canNext()} style={{ flex:3, padding:"13px", borderRadius:10, cursor: canNext()?"pointer":"not-allowed", background: canNext() ? `linear-gradient(135deg,${gold},${gold2})` : "rgba(255,255,255,0.04)", border:"none", color: canNext()?"#1a1005":"#445566", fontSize:14, fontWeight:"700", letterSpacing:2, fontFamily:"inherit", transition:"all 0.2s" }}>{step===LAST_STEP ? "✦ GENERATE PROMPT" : "Lanjut →"}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Sec({ title, sub, children }) {
+  return (
+    <div style={{ marginTop:20, display:"flex", flexDirection:"column", gap:10 }}>
+      <div>
+        <div style={{ fontSize:10, letterSpacing:4, color:"#c8a060", textTransform:"uppercase", marginBottom:5 }}>{sub}</div>
+        <h2 style={{ margin:0, fontSize:20, fontWeight:"400", color:"#f0e0c0", letterSpacing:1 }}>{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Card({ selected, onClick, children, accent }) {
+  return (
+    <div onClick={onClick} style={{ display:"flex", alignItems:"center", gap:14, padding:"13px 16px", borderRadius:12, cursor:"pointer", border: selected ? `1px solid ${accent||"#c8a060"}` : "1px solid rgba(255,255,255,0.07)", background: selected ? "rgba(200,160,80,0.09)" : "rgba(255,255,255,0.02)", transition:"all 0.17s ease" }}>{children}</div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder }) {
+  return (
+    <div>
+      <label style={{ fontSize:11, color:"#8899aa", letterSpacing:1, textTransform:"uppercase", marginBottom:7, display:"block" }}>{label}</label>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width:"100%", padding:"12px 14px", borderRadius:9, boxSizing:"border-box", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", color:"#e8e0d0", fontSize:13, outline:"none", fontFamily:"inherit" }} />
+    </div>
+  );
+}
+
+function ThumbImg({ src }) {
+  return (
+    <div style={{ borderRadius:8, overflow:"hidden", border:"1px solid rgba(255,255,255,0.08)", maxHeight:130, marginBottom:2 }}>
+      <img src={src} alt="product" style={{ width:"100%", objectFit:"cover", display:"block", maxHeight:130 }} />
+    </div>
+  );
+}
